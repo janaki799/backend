@@ -10,6 +10,11 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+app.use(cors({
+    origin: 'https://frontend-282uhmhsf-janaki799s-projects.vercel.app' // Replace with your frontend URL
+}));
+
+
 // Enhanced logging function
 const logInfo = (location, message, data = {}) => {
     console.log(`[${new Date().toISOString()}] ${location}:`, message, data);
