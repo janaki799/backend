@@ -71,6 +71,13 @@ transporter.verify(function(error, success) {
     }
 });
 
+/**
+ * Handles the '/health' GET request to check the server's health.
+ *
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {void}
+ */
 app.get('/health', async (req, res) => {
     try {
         const dbState = mongoose.connection.readyState;
