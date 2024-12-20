@@ -10,50 +10,48 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Allowed origins for CORS
 const allowedOrigins = [
-    'https://frontend-282uhmhsf-janaki799s-projects.vercel.app',
+    'https://frontend-8ecmtkquq-janaki799s-projects.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001'
 ];
 
-// CORS configuration
 app.use(cors({
-    origin: function (origin, callback) {
-        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
+    origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type'],
     credentials: true,
     maxAge: 86400
 }));
 
-// Middleware
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
-// Logging middleware
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
 });
 
-// MongoDB connection
-mongoose.connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-.then(() => console.log('MongoDB Connected'))
-.catch(err => {
-    console.error('MongoDB Connection Error:', err);
-    process.exit(1);
+async function connectDB() {
+    try {
+        await mongoose.connect(process.env.MONGODB_URI);
+        console.log('MongoDB Connected Successfully');
+    } catch (err) {
+        console.error('MongoDB Connection Error:', err);
+        process.exit(1);
+    }
+}
+
+connectDB();
+
+mongoose.connection.on('error', err => {
+    console.error('MongoDB connection error:', err);
 });
 
-// Email configuration
+mongoose.connection.on('disconnected', () => {
+    console.log('MongoDB disconnected');
+});
+
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -61,28 +59,50 @@ const transporter = nodemailer.createTransport({
         pass: process.env.EMAIL_PASS
     },
     tls: {
-        rejectUnauthorized: false
+        rejectUnauthorized: true
     }
 });
 
-// Routes
-app.get('/', (req, res) => {
-    res.send('Incident Reporting API is running');
+transporter.verify(function(error, success) {
+    if (error) {
+        console.log('Email configuration error:', error);
+    } else {
+        console.log("Email server is ready");
+    }
 });
 
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
-    });
+app.get('/health', async (req, res) => {
+    try {
+        const dbState = mongoose.connection.readyState;
+        const dbStatus = {
+            0: 'disconnected',
+            1: 'connected',
+            2: 'connecting',
+            3: 'disconnecting'
+        };
+
+        res.json({
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            mongodb: dbStatus[dbState] || 'unknown',
+            environment: process.env.NODE_ENV
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'unhealthy',
+            error: error.message
+        });
+    }
+});
+
+app.get('/', (req, res) => {
+    res.send('Incident Reporting API is running');
 });
 
 app.post('/reports', async (req, res) => {
     try {
         const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
 
-        // Validation
         if (!collegeCode || !incidentCategory || !incidentType || !description) {
             return res.status(400).json({
                 error: 'Missing required fields',
@@ -90,7 +110,6 @@ app.post('/reports', async (req, res) => {
             });
         }
 
-        // Create report
         const report = new Report({
             collegeCode,
             incidentCategory,
@@ -99,10 +118,8 @@ app.post('/reports', async (req, res) => {
             date: date || new Date()
         });
 
-        // Save report
         await report.save();
 
-        // Send email notification
         try {
             await transporter.sendMail({
                 from: process.env.EMAIL_USER,
@@ -119,7 +136,6 @@ app.post('/reports', async (req, res) => {
             });
         } catch (emailError) {
             console.error('Email sending failed:', emailError);
-            // Continue execution even if email fails
         }
 
         res.status(201).json({
@@ -137,7 +153,6 @@ app.post('/reports', async (req, res) => {
     }
 });
 
-// Error handling middleware
 app.use((err, req, res, next) => {
     console.error(err.stack);
     res.status(500).json({
@@ -147,7 +162,12 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Start server
+process.on('SIGTERM', async () => {
+    console.log('SIGTERM received. Shutting down gracefully...');
+    await mongoose.connection.close();
+    process.exit(0);
+});
+
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log('Environment:', process.env.NODE_ENV);
